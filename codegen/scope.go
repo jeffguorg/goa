@@ -93,22 +93,29 @@ done:
 
 // GoTypeDef returns the Go code that defines a Go type which matches the data
 // structure definition (the part that comes after `type foo`).
-func (s *NameScope) GoTypeDef(att *expr.AttributeExpr, useDefault bool) string {
+//
+// ptr if true indicates that the attributes (even the required ones) are
+// stored as pointers
+//
+// useDefault if true indicates that the attributes with default values
+// must be non-pointers (except object types which are always pointers)
+//
+func (s *NameScope) GoTypeDef(att *expr.AttributeExpr, ptr, useDefault bool) string {
 	switch actual := att.Type.(type) {
 	case expr.Primitive:
 		return GoNativeTypeName(actual)
 	case *expr.Array:
-		d := s.GoTypeDef(actual.ElemType, useDefault)
+		d := s.GoTypeDef(actual.ElemType, ptr, useDefault)
 		if expr.IsObject(actual.ElemType.Type) {
 			d = "*" + d
 		}
 		return "[]" + d
 	case *expr.Map:
-		keyDef := s.GoTypeDef(actual.KeyType, useDefault)
+		keyDef := s.GoTypeDef(actual.KeyType, ptr, useDefault)
 		if expr.IsObject(actual.KeyType.Type) {
 			keyDef = "*" + keyDef
 		}
-		elemDef := s.GoTypeDef(actual.ElemType, useDefault)
+		elemDef := s.GoTypeDef(actual.ElemType, ptr, useDefault)
 		if expr.IsObject(actual.ElemType.Type) {
 			elemDef = "*" + elemDef
 		}
@@ -128,8 +135,8 @@ func (s *NameScope) GoTypeDef(att *expr.AttributeExpr, useDefault bool) string {
 			)
 			{
 				fn = GoifyAtt(at, name, true)
-				tdef = s.GoTypeDef(at, useDefault)
-				if expr.IsObject(at.Type) || att.IsPrimitivePointer(name, useDefault) {
+				tdef = s.GoTypeDef(at, ptr, useDefault)
+				if expr.IsObject(at.Type) || (ptr && expr.IsPrimitive(at.Type)) || att.IsPrimitivePointer(name, useDefault) {
 					tdef = "*" + tdef
 				}
 				if at.Description != "" {
@@ -190,7 +197,7 @@ func (s *NameScope) GoFullTypeName(att *expr.AttributeExpr, pkg string) string {
 			s.GoFullTypeRef(actual.KeyType, pkg),
 			s.GoFullTypeRef(actual.ElemType, pkg))
 	case *expr.Object:
-		return s.GoTypeDef(att, false)
+		return s.GoTypeDef(att, false, false)
 	case expr.UserType:
 		if actual == expr.ErrorResult {
 			return "goa.ServiceError"
