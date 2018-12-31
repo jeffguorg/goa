@@ -23,12 +23,6 @@ var (
 	pathInitTmpl = template.Must(template.New("path-init").Funcs(template.FuncMap{"goify": codegen.Goify}).Parse(pathInitT))
 	// requestInitTmpl is the template used to render request constructors.
 	requestInitTmpl = template.Must(template.New("request-init").Parse(requestInitT))
-	// requiredProperty is the set of attribute properties to analyze attributes
-	// where required attributes are non-pointers.
-	requiredProperty = &expr.AttributeProperties{Required: true}
-	// useDefaultProperty is the set of attribute properties to analyze
-	// attributes where attributes with default values are non-pointers.
-	useDefaultProperty = &expr.AttributeProperties{Required: true, UseDefault: true}
 )
 
 type (
@@ -669,7 +663,7 @@ func (d ServicesData) analyze(hs *expr.HTTPServiceExpr) *ServiceData {
 						pointer := a.Params.IsPrimitivePointer(arg, false)
 						var vcode string
 						if att.Validation != nil {
-							an := expr.NewAttributeAnalyzer(att, requiredProperty)
+							an := newHTTPAnalyzer(att, true, false, false, "", svc.Scope)
 							vcode = codegen.RecursiveValidationCode(an, name)
 						}
 						initArgs[j] = &InitArgData{
@@ -936,7 +930,7 @@ func buildPayloadData(e *expr.HTTPEndpointExpr, sd *ServiceData) *PayloadData {
 					fieldName = codegen.Goify(name, true)
 				}
 				varn := codegen.Goify(name, false)
-				an := expr.NewAttributeAnalyzer(payload, &expr.AttributeProperties{Required: required})
+				an := newHTTPAnalyzer(payload, required, false, false, "", svc.Scope)
 				validate := codegen.RecursiveValidationCode(an, varn)
 				mapQueryParam = &ParamData{
 					Name:           name,
@@ -1025,8 +1019,8 @@ func buildPayloadData(e *expr.HTTPEndpointExpr, sd *ServiceData) *PayloadData {
 			)
 			if ut, ok := body.(expr.UserType); ok {
 				if val := ut.Attribute().Validation; val != nil {
-					svcode = codegen.RecursiveValidationCode(expr.NewAttributeAnalyzer(ut.Attribute(), requiredProperty), "body")
-					cvcode = codegen.RecursiveValidationCode(expr.NewAttributeAnalyzer(ut.Attribute(), useDefaultProperty), "body")
+					svcode = codegen.RecursiveValidationCode(newHTTPAnalyzer(ut.Attribute(), true, false, false, "", svc.Scope), "body")
+					cvcode = codegen.RecursiveValidationCode(newHTTPAnalyzer(ut.Attribute(), true, false, true, "", svc.Scope), "body")
 				}
 			}
 			serverArgs = []*InitArgData{{
@@ -1112,7 +1106,7 @@ func buildPayloadData(e *expr.HTTPEndpointExpr, sd *ServiceData) *PayloadData {
 						TypeName:    svc.Scope.GoTypeName(uatt),
 						TypeRef:     svc.Scope.GoTypeRef(uatt),
 						Pointer:     sc.UsernamePointer,
-						Validate:    codegen.RecursiveValidationCode(expr.NewAttributeAnalyzer(uatt, requiredProperty), sc.UsernameAttr),
+						Validate:    codegen.RecursiveValidationCode(newHTTPAnalyzer(uatt, true, false, false, "", svc.Scope), sc.UsernameAttr),
 						Example:     uatt.Example(expr.Root.API.Random()),
 					}
 					patt := e.MethodExpr.Payload.Find(sc.PasswordAttr)
@@ -1125,7 +1119,7 @@ func buildPayloadData(e *expr.HTTPEndpointExpr, sd *ServiceData) *PayloadData {
 						TypeName:    svc.Scope.GoTypeName(patt),
 						TypeRef:     svc.Scope.GoTypeRef(patt),
 						Pointer:     sc.PasswordPointer,
-						Validate:    codegen.RecursiveValidationCode(expr.NewAttributeAnalyzer(patt, requiredProperty), sc.PasswordAttr),
+						Validate:    codegen.RecursiveValidationCode(newHTTPAnalyzer(patt, true, false, false, "", svc.Scope), sc.PasswordAttr),
 						Example:     patt.Example(expr.Root.API.Random()),
 					}
 					cliArgs = []*InitArgData{uarg, parg}
@@ -1153,7 +1147,7 @@ func buildPayloadData(e *expr.HTTPEndpointExpr, sd *ServiceData) *PayloadData {
 			}
 
 			var helpers []*codegen.TransformFunctionData
-			serverCode, helpers, err = codegen.GoTypeTransform(body, ptype, "body", "v", "", svc.PkgName, true, svc.Scope)
+			serverCode, helpers, err = unmarshal(body, ptype, "body", "v", "", svc.PkgName, svc.Scope, false)
 			if err == nil {
 				sd.ServerTransformHelpers = codegen.AppendHelpers(sd.ServerTransformHelpers, helpers)
 			}
@@ -1162,20 +1156,20 @@ func buildPayloadData(e *expr.HTTPEndpointExpr, sd *ServiceData) *PayloadData {
 			// payload given to the client endpoint. It differs
 			// because the body type there does not use pointers for
 			// all fields (no need to validate).
-			clientCode, helpers, err = codegen.GoTypeTransform(body, ptype, "body", "v", "", svc.PkgName, false, svc.Scope)
+			clientCode, helpers, err = marshal(body, ptype, "body", "v", "", svc.PkgName, svc.Scope, false)
 			if err == nil {
 				sd.ClientTransformHelpers = codegen.AppendHelpers(sd.ClientTransformHelpers, helpers)
 			}
 		} else if expr.IsArray(payload.Type) || expr.IsMap(payload.Type) {
 			if params := expr.AsObject(e.Params.Type); len(*params) > 0 {
 				var helpers []*codegen.TransformFunctionData
-				serverCode, helpers, err = codegen.GoTypeTransform((*params)[0].Attribute.Type, payload.Type,
-					codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, true, svc.Scope)
+				serverCode, helpers, err = unmarshal((*params)[0].Attribute.Type, payload.Type,
+					codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, svc.Scope, false)
 				if err == nil {
 					sd.ServerTransformHelpers = codegen.AppendHelpers(sd.ServerTransformHelpers, helpers)
 				}
-				clientCode, helpers, err = codegen.GoTypeTransform((*params)[0].Attribute.Type, payload.Type,
-					codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, false, svc.Scope)
+				clientCode, helpers, err = marshal((*params)[0].Attribute.Type, payload.Type,
+					codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, svc.Scope, false)
 				if err == nil {
 					sd.ClientTransformHelpers = codegen.AppendHelpers(sd.ClientTransformHelpers, helpers)
 				}
@@ -1402,7 +1396,7 @@ func buildResponses(e *expr.HTTPEndpointExpr, result *expr.AttributeExpr, viewed
 							var vcode string
 							if ut, ok := resp.Body.Type.(expr.UserType); ok {
 								if val := ut.Attribute().Validation; val != nil {
-									an := expr.NewAttributeAnalyzer(ut.Attribute(), requiredProperty)
+									an := newHTTPAnalyzer(ut.Attribute(), true, false, false, "", svc.Scope)
 									vcode = codegen.RecursiveValidationCode(an, "body")
 								}
 							}
@@ -1421,14 +1415,14 @@ func buildResponses(e *expr.HTTPEndpointExpr, result *expr.AttributeExpr, viewed
 							//   response body. Here, the transformation code must rely that the
 							//   required attributes are set in the response body (otherwise
 							//   validation would fail).
-							code, helpers, err = codegen.GoTypeTransform(resp.Body.Type, resAttr.Type, "body", "v", "", pkg, true, svc.Scope)
+							code, helpers, err = unmarshal(resp.Body.Type, resAttr.Type, "body", "v", "", pkg, svc.Scope, viewed)
 							if err == nil {
 								sd.ClientTransformHelpers = codegen.AppendHelpers(sd.ClientTransformHelpers, helpers)
 							}
 						} else if expr.IsArray(result.Type) || expr.IsMap(result.Type) {
 							if params := expr.AsObject(e.QueryParams().Type); len(*params) > 0 {
-								code, helpers, err = codegen.GoTypeTransform((*params)[0].Attribute.Type, result.Type,
-									codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, true, svc.Scope)
+								code, helpers, err = unmarshal((*params)[0].Attribute.Type, result.Type,
+									codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, svc.Scope, false)
 								if err == nil {
 									sd.ClientTransformHelpers = codegen.AppendHelpers(sd.ClientTransformHelpers, helpers)
 								}
@@ -1563,15 +1557,15 @@ func buildErrorsData(e *expr.HTTPEndpointExpr, sd *ServiceData) []*ErrorGroupDat
 					}
 
 					var helpers []*codegen.TransformFunctionData
-					code, helpers, err = codegen.GoTypeTransform(body, etype, "body", "v", "", svc.PkgName, true, svc.Scope)
+					code, helpers, err = unmarshal(body, etype, "body", "v", "", svc.PkgName, svc.Scope, false)
 					if err == nil {
 						sd.ClientTransformHelpers = codegen.AppendHelpers(sd.ClientTransformHelpers, helpers)
 					}
 				} else if expr.IsArray(herr.Type) || expr.IsMap(herr.Type) {
 					if params := expr.AsObject(e.QueryParams().Type); len(*params) > 0 {
 						var helpers []*codegen.TransformFunctionData
-						code, helpers, err = codegen.GoTypeTransform((*params)[0].Attribute.Type, herr.Type,
-							codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, true, svc.Scope)
+						code, helpers, err = unmarshal((*params)[0].Attribute.Type, herr.Type,
+							codegen.Goify((*params)[0].Name, false), "v", "", svc.PkgName, svc.Scope, false)
 						if err == nil {
 							sd.ClientTransformHelpers = codegen.AppendHelpers(sd.ClientTransformHelpers, helpers)
 						}
@@ -1733,7 +1727,7 @@ func buildStreamData(ed *EndpointData, e *expr.HTTPEndpointExpr, sd *ServiceData
 							}
 							if ut, ok := body.(expr.UserType); ok {
 								if val := ut.Attribute().Validation; val != nil {
-									an := expr.NewAttributeAnalyzer(ut.Attribute(), requiredProperty)
+									an := newHTTPAnalyzer(ut.Attribute(), true, false, false, "", svc.Scope)
 									svcode = codegen.RecursiveValidationCode(an, "body")
 								}
 							}
@@ -1750,7 +1744,7 @@ func buildStreamData(ed *EndpointData, e *expr.HTTPEndpointExpr, sd *ServiceData
 					}
 					if body != expr.Empty {
 						var helpers []*codegen.TransformFunctionData
-						serverCode, helpers, err = codegen.GoTypeTransform(body, spayload.Type, "body", "v", "", svc.PkgName, true, svc.Scope)
+						serverCode, helpers, err = marshal(body, spayload.Type, "body", "v", "", svc.PkgName, svc.Scope, false)
 						if err == nil {
 							sd.ServerTransformHelpers = codegen.AppendHelpers(sd.ServerTransformHelpers, helpers)
 						}
@@ -1854,12 +1848,7 @@ func buildRequestBodyType(sd *ServiceData, e *expr.HTTPEndpointExpr, body, att *
 				varname, svc.Name, e.Name())
 			if svr {
 				// generate validation code for unmarshaled type (server-side).
-				an := expr.NewAttributeAnalyzer(body,
-					&expr.AttributeProperties{
-						Required:   true,
-						Pointer:    svr,
-						UseDefault: !svr,
-					})
+				an := newHTTPAnalyzer(body, true, svr, !svr, "", svc.Scope)
 				validateDef = codegen.RecursiveValidationCode(an, "body")
 				if validateDef != "" {
 					validateRef = fmt.Sprintf("err = Validate%s(&body)", varname)
@@ -1867,12 +1856,7 @@ func buildRequestBodyType(sd *ServiceData, e *expr.HTTPEndpointExpr, body, att *
 			}
 		} else {
 			varname = svc.Scope.GoTypeRef(&expr.AttributeExpr{Type: body.Type})
-			an := expr.NewAttributeAnalyzer(body,
-				&expr.AttributeProperties{
-					Required:   true,
-					Pointer:    svr,
-					UseDefault: !svr,
-				})
+			an := newHTTPAnalyzer(body, true, svr, !svr, "", svc.Scope)
 			validateRef = codegen.RecursiveValidationCode(an, "body")
 			desc = body.Description
 		}
@@ -1905,7 +1889,7 @@ func buildRequestBodyType(sd *ServiceData, e *expr.HTTPEndpointExpr, body, att *
 					srcType = srcObj.Attribute(origin).Type
 					src += "." + codegen.Goify(origin, true)
 				}
-				code, helpers, err = codegen.GoTypeTransform(srcType, body.Type, src, "body", pkg, "", false, svc.Scope)
+				code, helpers, err = marshal(srcType, body.Type, src, "body", pkg, "", svc.Scope, false)
 				if err != nil {
 					fmt.Println(err.Error()) // TBD validate DSL so errors are not possible
 				}
@@ -1991,12 +1975,7 @@ func buildResponseBodyType(sd *ServiceData, e *expr.HTTPEndpointExpr, body, att 
 		ref = svc.Scope.GoTypeRef(body)
 		mustInit = att.Type != expr.Empty && needInit(body.Type)
 
-		an := expr.NewAttributeAnalyzer(body,
-			&expr.AttributeProperties{
-				Required:   true,
-				Pointer:    !svr,
-				UseDefault: svr,
-			})
+		an := newHTTPAnalyzer(body, true, !svr, svr, "", svc.Scope)
 		if ut, ok := body.Type.(expr.UserType); ok {
 			// response body is a user type.
 			varname = codegen.Goify(ut.Name(), true)
@@ -2068,7 +2047,7 @@ func buildResponseBodyType(sd *ServiceData, e *expr.HTTPEndpointExpr, body, att 
 					srcType = srcObj.Attribute(origin).Type
 					src += "." + codegen.Goify(origin, true)
 				}
-				code, helpers, err = codegen.GoTypeTransform(srcType, body.Type, src, "body", pkg, "", false, svc.Scope)
+				code, helpers, err = marshal(srcType, body.Type, src, "body", pkg, "", svc.Scope, view != nil)
 				if err != nil {
 					fmt.Println(err.Error()) // TBD validate DSL so errors are not possible
 				}
@@ -2135,7 +2114,7 @@ func extractPathParams(a *expr.MappedAttributeExpr, serviceType *expr.AttributeE
 			StringSlice:    arr != nil && arr.ElemType.Type.Kind() == expr.StringKind,
 			Map:            false,
 			MapStringSlice: false,
-			Validate:       codegen.RecursiveValidationCode(expr.NewAttributeAnalyzer(c, requiredProperty), varn),
+			Validate:       codegen.RecursiveValidationCode(newHTTPAnalyzer(c, true, false, false, "", scope), varn),
 			DefaultValue:   c.DefaultValue,
 			Example:        c.Example(expr.Root.API.Random()),
 		})
@@ -2161,10 +2140,7 @@ func extractQueryParams(a *expr.MappedAttributeExpr, serviceType *expr.Attribute
 		if !expr.IsObject(serviceType.Type) {
 			fieldName = ""
 		}
-		an := expr.NewAttributeAnalyzer(c, &expr.AttributeProperties{
-			Required:   required,
-			UseDefault: c.DefaultValue != nil,
-		})
+		an := newHTTPAnalyzer(c, required, false, c.DefaultValue != nil, "", scope)
 		validate := codegen.RecursiveValidationCode(an, varn)
 		params = append(params, &ParamData{
 			Name:          elem,
@@ -2220,11 +2196,7 @@ func extractHeaders(a *expr.MappedAttributeExpr, serviceType *expr.AttributeExpr
 		if pointer {
 			typeRef = "*" + typeRef
 		}
-		an := expr.NewAttributeAnalyzer(hattr,
-			&expr.AttributeProperties{
-				Required:   required,
-				UseDefault: hattr.DefaultValue != nil,
-			})
+		an := newHTTPAnalyzer(hattr, required, false, hattr.DefaultValue != nil, "", scope)
 		validate := codegen.RecursiveValidationCode(an, varn)
 		headers = append(headers, &HeaderData{
 			Name:          elem,
@@ -2293,35 +2265,29 @@ func attributeTypeData(ut expr.UserType, req, ptr, server bool, scope *codegen.N
 	}
 	seen[ut.Name()] = false
 
-	att := &expr.AttributeExpr{Type: ut}
 	var (
 		name        string
 		desc        string
-		def         string
 		validate    string
 		validateRef string
+
+		// we want to consider defaults if generating the type for a response server side
+		// or a request client side because generated code initializes default value so
+		// field can never be nil.
+		att        = &expr.AttributeExpr{Type: ut}
+		useDefault = !req && server || req && !server
+		an         = newHTTPAnalyzer(att, true, ptr, useDefault, "", scope)
+		uattAn     = an.Dup(ut.Attribute())
 	)
 	{
-		name = scope.GoTypeName(att)
+		name = an.Name(false)
 		ctx := "request"
 		if !req {
 			ctx = "response"
 		}
 		desc = name + " is used to define fields on " + ctx + " body types."
 
-		// we want to consider defaults if generating the type for a response server side
-		// or a request client side because generated code initializes default value so
-		// field can never be nil.
-		useDefault := !req && server || req && !server
-
-		def = goTypeDef(scope, ut.Attribute(), ptr, useDefault)
-		an := expr.NewAttributeAnalyzer(ut.Attribute(),
-			&expr.AttributeProperties{
-				Required:   true,
-				Pointer:    ptr,
-				UseDefault: useDefault,
-			})
-		validate = codegen.RecursiveValidationCode(an, "body")
+		validate = codegen.RecursiveValidationCode(uattAn, "body")
 		if validate != "" {
 			validateRef = fmt.Sprintf("err = Validate%s(v)", name)
 		}
@@ -2330,12 +2296,104 @@ func attributeTypeData(ut expr.UserType, req, ptr, server bool, scope *codegen.N
 		Name:        ut.Name(),
 		VarName:     name,
 		Description: desc,
-		Def:         def,
-		Ref:         scope.GoTypeRef(att),
+		Def:         uattAn.Def(),
+		Ref:         an.Ref(false),
 		ValidateDef: validate,
 		ValidateRef: validateRef,
 		Example:     att.Example(expr.Root.API.Random()),
 	}
+}
+
+// httpAnalyzer implements AttributeAnalyzer interface.
+type httpAnalyzer struct {
+	*codegen.Analyzer
+}
+
+// newHTTPAnalyzer returns a new HTTP-specific AttributeAnalyzer for attribute
+// att.
+//
+// required if true indicates whether the attribute is required
+//
+// pointer if true indicates whether attributes in att are stored as pointer
+//
+// useDefault if true indicates whether attributes in att that have default
+// values are stored as non-pointers.
+//
+// pkg is the package name where the attribute type is generated
+//
+// scope is the named scope
+//
+func newHTTPAnalyzer(att *expr.AttributeExpr, required, pointer, useDefault bool, pkg string, scope *codegen.NameScope) codegen.AttributeAnalyzer {
+	return &httpAnalyzer{
+		Analyzer: codegen.NewAttributeAnalyzer(att, required, pointer, useDefault, pkg, scope).(*codegen.Analyzer),
+	}
+}
+
+func (h *httpAnalyzer) Def() string {
+	return goTypeDef(h.Scope, h.AttributeExpr, h.AttributeProperties.Pointer, h.AttributeProperties.UseDefault)
+}
+
+func (h *httpAnalyzer) Dup(att *expr.AttributeExpr) codegen.AttributeAnalyzer {
+	return &httpAnalyzer{
+		Analyzer: h.Analyzer.Dup(att).(*codegen.Analyzer),
+	}
+}
+
+// unmarshal transforms a source type to a target type. For unmarshalling,
+// the source type must store the underlying attributes as pointers and the
+// target type must use non-pointers to store attributes with default values.
+//
+// source, target are the source and target types
+//
+// sourceVar, targetVar are the variable names for source and target used in
+// the transformation code
+//
+// sourcePkg, targetPkg are the package names where the source and target type
+// exist
+//
+// scope is the named scope
+//
+// ptr if true indicates that the target type uses pointers to hold underlying
+// attributes (even the ones with default value). It is true if the target type
+// is a projected type.
+//
+func unmarshal(source, target expr.DataType, sourceVar, targetVar, sourcePkg, targetPkg string, scope *codegen.NameScope, ptr bool) (string, []*codegen.TransformFunctionData, error) {
+	sourceAn := newHTTPAnalyzer(
+		&expr.AttributeExpr{Type: source},
+		false, true, false, sourcePkg, scope)
+	targetAn := newHTTPAnalyzer(
+		&expr.AttributeExpr{Type: target},
+		true, ptr, true, targetPkg, scope)
+	return codegen.Transform(sourceAn, targetAn, sourceVar, targetVar, "unmarshal")
+}
+
+// marshal transforms a source type to a target type. For marshalling, the
+// source type must use non-pointers to store attributes with default values
+// and the target type must use pointers to hold underlying attributes
+// (even the ones with default values).
+//
+// source, target are the source and target types
+//
+// sourceVar, targetVar are the variable names for source and target used in
+// the transformation code
+//
+// sourcePkg, targetPkg are the package names where the source and target type
+// exist
+//
+// scope is the named scope
+//
+// ptr if true indicates that the source type uses pointers to hold underlying
+// attributes (even the ones with default value). It is true if the source type
+// is a projected type.
+//
+func marshal(source, target expr.DataType, sourceVar, targetVar, sourcePkg, targetPkg string, scope *codegen.NameScope, ptr bool) (string, []*codegen.TransformFunctionData, error) {
+	sourceAn := newHTTPAnalyzer(
+		&expr.AttributeExpr{Type: source},
+		true, ptr, true, sourcePkg, scope)
+	targetAn := newHTTPAnalyzer(
+		&expr.AttributeExpr{Type: target},
+		true, false, true, targetPkg, scope)
+	return codegen.Transform(sourceAn, targetAn, sourceVar, targetVar, "marshal")
 }
 
 func appendUnique(s []*service.SchemeData, d *service.SchemeData) []*service.SchemeData {

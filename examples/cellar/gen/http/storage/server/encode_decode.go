@@ -305,9 +305,9 @@ func NewStorageMultiUpdateDecoder(mux goahttp.Muxer, storageMultiUpdateDecoderFn
 	}
 }
 
-// marshalWineryViewToWineryResponseTiny builds a value of type
+// marshalStorageviewsWineryViewToWineryResponseTiny builds a value of type
 // *WineryResponseTiny from a value of type *storageviews.WineryView.
-func marshalWineryViewToWineryResponseTiny(v *storageviews.WineryView) *WineryResponseTiny {
+func marshalStorageviewsWineryViewToWineryResponseTiny(v *storageviews.WineryView) *WineryResponseTiny {
 	res := &WineryResponseTiny{
 		Name: *v.Name,
 	}
@@ -315,9 +315,9 @@ func marshalWineryViewToWineryResponseTiny(v *storageviews.WineryView) *WineryRe
 	return res
 }
 
-// marshalWineryViewToWineryResponseBodyTiny builds a value of type
+// marshalStorageviewsWineryViewToWineryResponseBodyTiny builds a value of type
 // *WineryResponseBodyTiny from a value of type *storageviews.WineryView.
-func marshalWineryViewToWineryResponseBodyTiny(v *storageviews.WineryView) *WineryResponseBodyTiny {
+func marshalStorageviewsWineryViewToWineryResponseBodyTiny(v *storageviews.WineryView) *WineryResponseBodyTiny {
 	res := &WineryResponseBodyTiny{
 		Name: *v.Name,
 	}
@@ -325,9 +325,9 @@ func marshalWineryViewToWineryResponseBodyTiny(v *storageviews.WineryView) *Wine
 	return res
 }
 
-// unmarshalWineryRequestBodyToWinery builds a value of type *storage.Winery
-// from a value of type *WineryRequestBody.
-func unmarshalWineryRequestBodyToWinery(v *WineryRequestBody) *storage.Winery {
+// unmarshalWineryRequestBodyToStorageWinery builds a value of type
+// *storage.Winery from a value of type *WineryRequestBody.
+func unmarshalWineryRequestBodyToStorageWinery(v *WineryRequestBody) *storage.Winery {
 	res := &storage.Winery{
 		Name:    *v.Name,
 		Region:  *v.Region,

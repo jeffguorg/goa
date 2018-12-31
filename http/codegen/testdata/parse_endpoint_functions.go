@@ -555,7 +555,7 @@ func BuildMethodMultiPayloadPayload(serviceMultiMethodMultiPayloadBody string, s
 	}
 	v := &servicemulti.MethodMultiPayloadPayload{}
 	if body.C != nil {
-		v.C = marshalUserTypeRequestBodyToUserType(body.C)
+		v.C = marshalUserTypeRequestBodyToServicemultiUserType(body.C)
 	}
 	v.B = b
 	v.A = a

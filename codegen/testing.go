@@ -118,57 +118,16 @@ func Diff(t *testing.T, s1, s2 string) string {
 	return strings.Replace(string(diffb), "\t", " ␉ ", -1)
 }
 
-// NewObject returns an attribute expression of type object. The params must
-// contain alternating attribute name and type pair.
-// e.g. NewObject("a", String, "b", Int)
-func NewObject(params ...interface{}) *expr.AttributeExpr {
-	obj := expr.Object{}
-	for i := 0; i < len(params); i += 2 {
-		name := params[i].(string)
-		typ := params[i+1].(expr.DataType)
-		obj = append(obj, &expr.NamedAttributeExpr{Name: name, Attribute: &expr.AttributeExpr{Type: typ}})
-	}
-	return &expr.AttributeExpr{Type: &obj}
+// NewUseDefaultAnalyzer returns an attribute analyzer which uses non-pointers
+// for attributes with default values. It is used only in tests.
+func NewUseDefaultAnalyzer(dt expr.DataType, pkg string, scope *NameScope) AttributeAnalyzer {
+	return NewAttributeAnalyzer(&expr.AttributeExpr{Type: dt}, true, false, true, pkg, scope)
 }
 
-// SetRequired sets the given attribute names as required in an attribute
-// expression. It overwrites the existing validations in the attribute.
-func SetRequired(att *expr.AttributeExpr, names ...string) *expr.AttributeExpr {
-	att.Validation = &expr.ValidationExpr{Required: names}
-	return att
-}
-
-// SetDefault sets default values for the given attributes in an attribute
-// expression. It does nothing if the attribute expression is not an object
-// type. The vals param must contain alternating attribute name and
-// default value (as a string) pair. It ignores any attribute not found in
-// the attribute expression.
-// e.g. SetDefault(att, "a", "1", "b", "zzz")
-func SetDefault(att *expr.AttributeExpr, vals ...interface{}) *expr.AttributeExpr {
-	obj, ok := att.Type.(*expr.Object)
-	if !ok {
-		return att
-	}
-	for i := 0; i < len(vals); i += 2 {
-		name := vals[i].(string)
-		if a := obj.Attribute(name); a != nil {
-			a.DefaultValue = vals[i+1]
-		}
-	}
-	return att
-}
-
-// NewArray returns an attribute expression of type array.
-func NewArray(dt expr.DataType) *expr.AttributeExpr {
-	elem := &expr.AttributeExpr{Type: dt}
-	return &expr.AttributeExpr{Type: &expr.Array{ElemType: elem}}
-}
-
-// NewMap returns an attribute expression of type map.
-func NewMap(keyt, elemt expr.DataType) *expr.AttributeExpr {
-	key := &expr.AttributeExpr{Type: keyt}
-	elem := &expr.AttributeExpr{Type: elemt}
-	return &expr.AttributeExpr{Type: &expr.Map{KeyType: key, ElemType: elem}}
+// NewPointerAnalyzer returns an attribute analyzer which uses pointers for all
+// attributes.
+func NewPointerAnalyzer(dt expr.DataType, pkg string, scope *NameScope) AttributeAnalyzer {
+	return NewAttributeAnalyzer(&expr.AttributeExpr{Type: dt}, true, true, true, pkg, scope)
 }
 
 // CreateTempFile creates a temporary file and writes the given content.
